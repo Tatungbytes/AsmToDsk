@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-AsmToDsk – v2.2
+AsmToDsk – v2.3 (Cross-Platform Edition)
 ────────────────────────────────────────────
 Z80 .ASM → CP/M .COM → Tatung Einstein .DSK
-Works on both Windows and Linux with GUI (Tkinter)
+Works on Windows, Linux, and macOS (Tkinter GUI)
 ────────────────────────────────────────────
 """
 
@@ -16,10 +16,11 @@ import subprocess
 import threading
 import datetime
 from pathlib import Path
+from shutil import which
 import tkinter as tk
 from tkinter import ttk, filedialog, messagebox, font as tkfont
 
-# Optional theming (ttkbootstrap if available)
+# Optional theming (ttkbootstrap if installed)
 try:
     import ttkbootstrap as tb
     from ttkbootstrap.constants import *
@@ -29,46 +30,42 @@ except Exception:
 
 
 APP_NAME = "AsmToDsk"
-APP_VERSION = "2.2"
+APP_VERSION = "2.3"
 APP_TITLE = f"{APP_NAME} v{APP_VERSION}"
 
 # ─────────────────────────────────────────────
-# ✅ Cross-platform environment and paths
+# Environment setup and helpers
 # ─────────────────────────────────────────────
 
 HOME = Path.home()
 DESKTOP = HOME / "Desktop"
 DOCS = HOME / "Documents"
+Z88DK_HOME = HOME / "z88dk"  # Windows default location for z88dk
 
-def default_path_windows_or_linux(win_path, linux_path):
-    """Return Windows path if running on Windows, else Linux path."""
-    return win_path if os.name == "nt" else linux_path
+def normalize_path(p: str) -> str:
+    """Ensure any path uses correct OS separators and resolves properly."""
+    return str(Path(p).expanduser().resolve())
+
+def find_tool(name: str, default_win: Path, default_linux: str) -> str:
+    """Find a tool in PATH or fallback to a platform default."""
+    path = which(name)
+    if path:
+        return path
+    return str(default_win) if os.name == "nt" else default_linux
 
 HARDCODED = {
-    "z80asm": str(default_path_windows_or_linux(
-        HOME / "z88dk/bin/z80asm.exe",
-        "/usr/bin/z80asm"
-    )),
-    "appmake": str(default_path_windows_or_linux(
-        HOME / "z88dk/bin/z88dk-appmake.exe",
-        "/usr/bin/z88dk-appmake"
-    )),
+    "z80asm": find_tool("z80asm", Z88DK_HOME / "bin/z80asm.exe", "/usr/bin/z80asm"),
+    "appmake": find_tool("z88dk-appmake", Z88DK_HOME / "bin/z88dk-appmake.exe", "/usr/bin/z88dk-appmake"),
     "workdir": str(DESKTOP),
-    "mame": str(default_path_windows_or_linux(
-        Path("C:/Program Files/MAME/mame.exe"),
-        "/usr/games/mame"
-    )),
+    "mame": find_tool("mame", Path("C:/Program Files/MAME/mame.exe"), "/usr/games/mame"),
     "system_dsk": str(DOCS / "Disk Images/DOS80.DSK"),
-    "rompath": str(default_path_windows_or_linux(
-        HOME / "MAME/roms",
-        HOME / ".mame/roms"
-    )),
+    "rompath": str(HOME / ("MAME/roms" if os.name == "nt" else ".mame/roms")),
 }
 
 LOG_DIR = DOCS / "Logs"
 
 # ─────────────────────────────────────────────
-# ✅ Display check (Linux only)
+# Display check (Linux only)
 # ─────────────────────────────────────────────
 if platform.system() not in ("Windows", "Darwin"):
     if not os.environ.get("DISPLAY") and not os.environ.get("WAYLAND_DISPLAY"):
@@ -76,7 +73,7 @@ if platform.system() not in ("Windows", "Darwin"):
         sys.exit(1)
 
 # ─────────────────────────────────────────────
-# ✅ Utility classes
+# File logger utility
 # ─────────────────────────────────────────────
 
 class FileLogger:
@@ -119,7 +116,7 @@ def ensure_runtime_dir_env(env: dict) -> dict:
     return env
 
 # ─────────────────────────────────────────────
-# ✅ Helpers for COM and DSK files
+# Helpers for COM + DSK files
 # ─────────────────────────────────────────────
 
 def _remove_com_variants(folder: Path, base_stem: str):
@@ -146,7 +143,7 @@ def _normalise_to_single_uppercase_com(wd: Path, asm_dir: Path, base_stem: str) 
     return desired
 
 # ─────────────────────────────────────────────
-# ✅ Main Application Class
+# Main GUI App
 # ─────────────────────────────────────────────
 
 class App:
@@ -155,7 +152,6 @@ class App:
         self.root.title(APP_TITLE)
         self.root.resizable(True, True)
 
-        # Tk variables
         self.var_z80asm = tk.StringVar(value=HARDCODED["z80asm"])
         self.var_appmake = tk.StringVar(value=HARDCODED["appmake"])
         self.var_asm = tk.StringVar()
@@ -173,6 +169,8 @@ class App:
 
         self._build_ui()
         self._fit_to_content()
+
+    # ─────────────── UI setup ───────────────
 
     def _on_asm_changed(self, *_):
         p = self.var_asm.get().strip()
@@ -207,9 +205,6 @@ class App:
         self._row(lf_mame, "System Disk:", self.var_dos80, browse=True)
         self._row(lf_mame, "ROM path:", self.var_rompath, browse_dir=True)
 
-        # Boot Direct option removed (no checkbox)
-        # ttk.Checkbutton(lf_mame, text="Boot directly (no DOS80, add loader)", variable=self.var_boot_direct).pack(side="top", padx=6, pady=4)
-
         actions = ttk.Frame(frm)
         actions.pack(fill="x", pady=(0, pad))
         ttk.Button(actions, text="Build COM + DSK", command=self._start_build).pack(side="left")
@@ -235,14 +230,18 @@ class App:
 
     def _browse_file(self, var, filetypes=None):
         p = filedialog.askopenfilename(title="Choose file", filetypes=filetypes or [("All files", "*.*")])
-        if p: var.set(p)
+        if p:
+            var.set(normalize_path(p))
 
     def _browse_dir(self, var):
         d = filedialog.askdirectory(title="Choose folder")
-        if d: var.set(d)
+        if d:
+            var.set(normalize_path(d))
+
+    # ─────────────── Build Process ───────────────
 
     def _out_paths(self):
-        wd = Path(self.var_workdir.get())
+        wd = Path(normalize_path(self.var_workdir.get()))
         base = self.base_upper or Path(self.var_asm.get()).stem.upper()
         com = wd / f"{base}.COM"
         dsk = wd / f"{base}.DSK"
@@ -250,16 +249,13 @@ class App:
         log = LOG_DIR / f"{base}_build.log"
         return wd, base, com, dsk, obj, log
 
-    # ─────────────────────────────────────────────
-    # BUILD
-    # ─────────────────────────────────────────────
     def _start_build(self):
         threading.Thread(target=self._build_thread, daemon=True).start()
 
     def _build_thread(self):
         try:
             self.status.set("Building…")
-            asm = Path(self.var_asm.get())
+            asm = Path(normalize_path(self.var_asm.get()))
             if not asm.exists():
                 self.status.set("Error: Source .asm not found.")
                 return
@@ -269,8 +265,8 @@ class App:
             logger.line(f"Building {asm}")
             _remove_com_variants(wd, base)
 
-            z80asm = str(Path(self.var_z80asm.get()))
-            appmake = str(Path(self.var_appmake.get()))
+            z80asm = normalize_path(self.var_z80asm.get())
+            appmake = normalize_path(self.var_appmake.get())
 
             logger.stream_proc([z80asm, "-v", "-b", str(asm), f"-o{com.name}"], cwd=str(wd))
             final_com = _normalise_to_single_uppercase_com(wd, asm.parent, base)
@@ -284,9 +280,8 @@ class App:
         except Exception as e:
             self.status.set(f"Build failed: {e}")
 
-    # ─────────────────────────────────────────────
-    # RUN IN MAME
-    # ─────────────────────────────────────────────
+    # ─────────────── Run in MAME ───────────────
+
     def _start_run(self):
         threading.Thread(target=self._run_thread, daemon=True).start()
 
@@ -297,22 +292,14 @@ class App:
                 self.status.set("Error: .DSK missing. Build first.")
                 return
 
-            mame = Path(self.var_mame.get()).expanduser()
-            rompath = Path(self.var_rompath.get()).expanduser()
+            mame = Path(normalize_path(self.var_mame.get()))
+            rompath = Path(normalize_path(self.var_rompath.get()))
+            dos80 = Path(normalize_path(self.var_dos80.get()))
             env = ensure_runtime_dir_env(os.environ.copy())
 
             args = ["-window", "-ui_active", "-skip_gameinfo"]
-
-            # Bootloader functionality commented out:
-            # self.status.set("Injecting bootloader…")
-            # with open(dsk, "r+b") as f:
-            #     f.seek(0)
-            #     boot = bytes([0x21,0x00,0x01,0x11,0x00,0x04,0xCD,0x20,0x00,0xED,0xB0,0xC3,0x00,0x01])
-            #     f.write(boot.ljust(512, b'\xE5'))
-            # cmd = [str(mame), "-rompath", str(rompath), "einstein", "-flop1", str(dsk)] + args
-
-            dos80 = Path(self.var_dos80.get())
-            cmd = [str(mame), "-rompath", str(rompath), "einstein", "-flop1", str(dos80), "-flop2", str(dsk)] + args
+            cmd = [str(mame), "-rompath", str(rompath), "einstein",
+                   "-flop1", str(dos80), "-flop2", str(dsk)] + args
 
             subprocess.run(cmd, cwd=str(wd), env=env)
             self.status.set("MAME exited normally.")
@@ -320,7 +307,7 @@ class App:
             self.status.set(f"Run failed: {e}")
 
 # ─────────────────────────────────────────────
-# MAIN
+# Main Entry
 # ─────────────────────────────────────────────
 
 def main():
