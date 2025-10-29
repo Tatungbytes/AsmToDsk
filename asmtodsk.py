@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-AsmToDsk – v2.3 (Cross-Platform Edition)
+AsmToDsk – v2.4 (Cross-Platform Edition)
 ────────────────────────────────────────────
 Z80 .ASM → CP/M .COM → Tatung Einstein .DSK
 Works on Windows, Linux, and macOS (Tkinter GUI)
@@ -28,9 +28,8 @@ try:
 except Exception:
     THEME = False
 
-
 APP_NAME = "AsmToDsk"
-APP_VERSION = "2.3"
+APP_VERSION = "2.4"
 APP_TITLE = f"{APP_NAME} v{APP_VERSION}"
 
 # ─────────────────────────────────────────────
@@ -40,7 +39,7 @@ APP_TITLE = f"{APP_NAME} v{APP_VERSION}"
 HOME = Path.home()
 DESKTOP = HOME / "Desktop"
 DOCS = HOME / "Documents"
-Z88DK_HOME = HOME / "z88dk"  # Windows default location for z88dk
+Z88DK_HOME = HOME / "z88dk"  # Default user install location on Windows
 
 def normalize_path(p: str) -> str:
     """Ensure any path uses correct OS separators and resolves properly."""
@@ -94,6 +93,8 @@ class FileLogger:
 
     def stream_proc(self, args, cwd=None, env=None):
         self.cmd(args)
+        print(f"Running command: {args}")  # Debug
+        print(f"Working directory: {cwd}")  # Debug
         proc = subprocess.Popen(args, cwd=cwd, env=env, stdout=subprocess.PIPE,
                                 stderr=subprocess.STDOUT, text=True)
         for line in proc.stdout:
@@ -161,6 +162,7 @@ class App:
         self.var_mame = tk.StringVar(value=HARDCODED["mame"])
         self.var_dos80 = tk.StringVar(value=HARDCODED["system_dsk"])
         self.var_rompath = tk.StringVar(value=HARDCODED["rompath"])
+        self.var_romdir = tk.StringVar(value=str(HOME / "MAME/EinsteinROMs"))
 
         self.base_upper = ""
         self.status = tk.StringVar(value="Ready")
@@ -204,6 +206,7 @@ class App:
         self._row(lf_mame, "mame:", self.var_mame, browse=True)
         self._row(lf_mame, "System Disk:", self.var_dos80, browse=True)
         self._row(lf_mame, "ROM path:", self.var_rompath, browse_dir=True)
+        self._row(lf_mame, "Einstein ROM folder:", self.var_romdir, browse_dir=True)
 
         actions = ttk.Frame(frm)
         actions.pack(fill="x", pady=(0, pad))
@@ -294,11 +297,15 @@ class App:
 
             mame = Path(normalize_path(self.var_mame.get()))
             rompath = Path(normalize_path(self.var_rompath.get()))
+            romdir = Path(normalize_path(self.var_romdir.get()))
             dos80 = Path(normalize_path(self.var_dos80.get()))
             env = ensure_runtime_dir_env(os.environ.copy())
 
             args = ["-window", "-ui_active", "-skip_gameinfo"]
-            cmd = [str(mame), "-rompath", str(rompath), "einstein",
+            sep = ";" if os.name == "nt" else ":"
+            combined_rompath = f"{rompath}{sep}{romdir}"
+
+            cmd = [str(mame), "-rompath", combined_rompath, "einstein",
                    "-flop1", str(dos80), "-flop2", str(dsk)] + args
 
             subprocess.run(cmd, cwd=str(wd), env=env)
