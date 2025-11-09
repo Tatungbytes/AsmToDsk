@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-AsmToDsk – v2.4 (Cross-Platform Edition)
+AsmToDsk – v2.5 (Cross-Platform Edition)
 ────────────────────────────────────────────
 Z80 .ASM → CP/M .COM → Tatung Einstein .DSK
 Works on Windows, Linux, and macOS (Tkinter GUI)
@@ -15,6 +15,7 @@ import shutil
 import subprocess
 import threading
 import datetime
+import json
 from pathlib import Path
 from shutil import which
 import tkinter as tk
@@ -29,8 +30,9 @@ except Exception:
     THEME = False
 
 APP_NAME = "AsmToDsk"
-APP_VERSION = "2.4"
+APP_VERSION = "2.5"
 APP_TITLE = f"{APP_NAME} v{APP_VERSION}"
+CONFIG_FILE = Path(__file__).with_name("AsmToDsk_config.json")
 
 # ─────────────────────────────────────────────
 # Environment setup and helpers
@@ -93,8 +95,8 @@ class FileLogger:
 
     def stream_proc(self, args, cwd=None, env=None):
         self.cmd(args)
-        print(f"Running command: {args}")  # Debug
-        print(f"Working directory: {cwd}")  # Debug
+        print(f"Running command: {args}")
+        print(f"Working directory: {cwd}")
         proc = subprocess.Popen(args, cwd=cwd, env=env, stdout=subprocess.PIPE,
                                 stderr=subprocess.STDOUT, text=True)
         for line in proc.stdout:
@@ -144,6 +146,28 @@ def _normalise_to_single_uppercase_com(wd: Path, asm_dir: Path, base_stem: str) 
     return desired
 
 # ─────────────────────────────────────────────
+# Config management
+# ─────────────────────────────────────────────
+
+def load_config():
+    """Load settings from JSON file if it exists."""
+    if CONFIG_FILE.exists():
+        try:
+            with CONFIG_FILE.open("r", encoding="utf-8") as f:
+                return json.load(f)
+        except Exception:
+            return {}
+    return {}
+
+def save_config(data: dict):
+    """Save settings to JSON file."""
+    try:
+        with CONFIG_FILE.open("w", encoding="utf-8") as f:
+            json.dump(data, f, indent=4)
+    except Exception as e:
+        print(f"Warning: failed to save config: {e}")
+
+# ─────────────────────────────────────────────
 # Main GUI App
 # ─────────────────────────────────────────────
 
@@ -153,16 +177,18 @@ class App:
         self.root.title(APP_TITLE)
         self.root.resizable(True, True)
 
-        self.var_z80asm = tk.StringVar(value=HARDCODED["z80asm"])
-        self.var_appmake = tk.StringVar(value=HARDCODED["appmake"])
-        self.var_asm = tk.StringVar()
-        self.var_workdir = tk.StringVar(value=HARDCODED["workdir"])
-        self.var_origin = tk.StringVar(value="256")
-        self.var_cpmdisk_fmt = tk.StringVar(value="einstein")
-        self.var_mame = tk.StringVar(value=HARDCODED["mame"])
-        self.var_dos80 = tk.StringVar(value=HARDCODED["system_dsk"])
-        self.var_rompath = tk.StringVar(value=HARDCODED["rompath"])
-        self.var_romdir = tk.StringVar(value=str(HOME / "MAME/EinsteinROMs"))
+        config = load_config()
+
+        self.var_z80asm = tk.StringVar(value=config.get("z80asm", HARDCODED["z80asm"]))
+        self.var_appmake = tk.StringVar(value=config.get("appmake", HARDCODED["appmake"]))
+        self.var_asm = tk.StringVar(value=config.get("asm", ""))
+        self.var_workdir = tk.StringVar(value=config.get("workdir", HARDCODED["workdir"]))
+        self.var_origin = tk.StringVar(value=config.get("origin", "256"))
+        self.var_cpmdisk_fmt = tk.StringVar(value=config.get("cpmdisk_fmt", "einstein"))
+        self.var_mame = tk.StringVar(value=config.get("mame", HARDCODED["mame"]))
+        self.var_dos80 = tk.StringVar(value=config.get("dos80", HARDCODED["system_dsk"]))
+        self.var_rompath = tk.StringVar(value=config.get("rompath", HARDCODED["rompath"]))
+        self.var_romdir = tk.StringVar(value=config.get("romdir", str(HOME / "MAME/EinsteinROMs")))
 
         self.base_upper = ""
         self.status = tk.StringVar(value="Ready")
@@ -252,7 +278,24 @@ class App:
         log = LOG_DIR / f"{base}_build.log"
         return wd, base, com, dsk, obj, log
 
+    def _save_current_config(self):
+        """Save all current UI variables to JSON file."""
+        data = {
+            "z80asm": self.var_z80asm.get(),
+            "appmake": self.var_appmake.get(),
+            "asm": self.var_asm.get(),
+            "workdir": self.var_workdir.get(),
+            "origin": self.var_origin.get(),
+            "cpmdisk_fmt": self.var_cpmdisk_fmt.get(),
+            "mame": self.var_mame.get(),
+            "dos80": self.var_dos80.get(),
+            "rompath": self.var_rompath.get(),
+            "romdir": self.var_romdir.get(),
+        }
+        save_config(data)
+
     def _start_build(self):
+        self._save_current_config()
         threading.Thread(target=self._build_thread, daemon=True).start()
 
     def _build_thread(self):
